@@ -16,10 +16,6 @@ import (
 	"github.com/russross/blackfriday"
 )
 
-func render() {
-
-}
-
 func main() {
 	// Args
 	port := flag.Int("p", 1337, "GoDown Port")
@@ -28,14 +24,24 @@ func main() {
 	flag.Parse()
 	strPort := strconv.Itoa(*port)
 
+	help := func() {
+		fmt.Fprintln(os.Stdout, "usage: godown {COMMANDS} <PATH> {FLAGS}\n")
+		fmt.Fprintln(os.Stdout, "  Watches changes to a file and previews the markdown in the browser\n")
+		fmt.Fprintln(os.Stdout, "COMMANDS:\n")
+		fmt.Fprintf(os.Stdout, "  %-15s%s", "start PATH", "starts watching a file given a path\n")
+		fmt.Fprintf(os.Stdout, "  %-15s%s", "stop", "stops the GoDown process\n\n")
+		fmt.Fprintln(os.Stdout, "FLAGS:")
+		flag.PrintDefaults()
+	}
+
 	if len(flag.Args()) < 1 {
-		fmt.Println("Godown Command Required")
+		help()
 		return
 	}
 
 	command := strings.ToLower(flag.Arg(0))
 	if command != "start" && command != "stop" {
-		fmt.Println("Invalid Godown Command: (start | stop) required")
+		help()
 		return
 	}
 
@@ -44,7 +50,7 @@ func main() {
 		client := http.Client{}
 		req, err := http.NewRequest("DELETE", "http://localhost:"+strPort, nil)
 		if err != nil {
-			fmt.Printf("GoDown Error: could not stop server %q\n", err)
+			fmt.Printf("error: could not create stop server request: %q\n", err)
 			return
 		}
 		client.Do(req)
@@ -53,7 +59,7 @@ func main() {
 
 	file := flag.Arg(1)
 	if file == "" {
-		fmt.Println("File not specified")
+		help()
 		return
 	}
 
@@ -90,20 +96,20 @@ func main() {
 	}
 
 	if len(args) == 0 {
-		fmt.Println("Cannot open browser")
+		fmt.Println("warning: no open command")
 	} else {
 		args = append(args, "http://localhost:"+strPort)
 		command := exec.Command(args[0], args[1:]...)
 		err := command.Start()
 		if err != nil {
-			fmt.Printf("Error starting in browser: %v", err)
+			fmt.Printf("error: could not open url: %v", err)
 		}
 	}
 
 	// Try to watch the file
 	stat, err := os.Stat(file)
 	if err != nil {
-		fmt.Printf("GoDown Error: Could not read file: %q\n", err)
+		fmt.Printf("error: could not read file: %q\n", err)
 		return
 	}
 
@@ -128,7 +134,7 @@ func main() {
 			}
 			// something changed
 			if newStat.Size() != stat.Size() || newStat.ModTime() != stat.ModTime() {
-				fmt.Println("File change detected: reading file and rendering markdown")
+				fmt.Println("change detected: rerendering")
 				fileStr, err := ioutil.ReadFile(file)
 				if err == nil {
 					renderedStr := blackfriday.MarkdownCommon(fileStr)
