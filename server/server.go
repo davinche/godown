@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 
 	"golang.org/x/net/websocket"
@@ -13,22 +14,39 @@ type renderString struct {
 
 // Server is a websocket server
 type Server struct {
-	clients     []*websocket.Conn
+	clients     map[int]*wsClient
 	renderCh    chan string
 	doneCh      chan struct{}
-	Prefix      string
 	HasShutdown chan struct{}
+	prefix      string
+}
+
+type wsClient struct {
+	id int
+	ws *websocket.Conn
 }
 
 func (s *Server) handleConn(ws *websocket.Conn) {
-	s.addClient(ws)
+	c := s.addClient(ws)
+	for {
+		var msg string
+		err := websocket.Message.Receive(ws, &msg)
+		if err != nil {
+			if err == io.EOF {
+				s.delClient(c)
+			} else {
+				fmt.Printf("error reading from websocket: %q\n", err)
+			}
+		}
+	}
 }
 
 // Listen begins listening for new markdown strings to broadcast
 func (s *Server) Listen() {
 	fmt.Println("Markdown Websocket Server Listening...")
-	http.Handle(s.Prefix, websocket.Handler(s.handleConn))
+	http.Handle(s.prefix, websocket.Handler(s.handleConn))
 
+	// loop check for new strings to push to clients
 	for {
 		select {
 		case renderedStr := <-s.renderCh:
@@ -52,19 +70,32 @@ func (s *Server) Done() {
 
 func (s *Server) broadcast(renderedStr string) {
 	rendered := renderString{renderedStr}
-	for _, c := range s.clients {
-		websocket.JSON.Send(c, rendered)
+	for id, c := range s.clients {
+		err := websocket.JSON.Send(c.ws, rendered)
+		if err != nil {
+			fmt.Printf("error sending data: %q\n", err)
+			delete(s.clients, id)
+		}
 	}
 }
 
-func (s *Server) addClient(ws *websocket.Conn) {
-	s.clients = append(s.clients, ws)
+func (s *Server) addClient(ws *websocket.Conn) *wsClient {
+	client := &wsClient{
+		id: len(s.clients),
+		ws: ws,
+	}
+	s.clients[client.id] = client
+	return client
+}
+
+func (s *Server) delClient(c *wsClient) {
+	delete(s.clients, c.id)
 }
 
 func (s *Server) close() {
 	fmt.Println("Shutting Down...")
 	for _, c := range s.clients {
-		c.Close()
+		c.ws.Close()
 	}
 	s.HasShutdown <- struct{}{}
 }
@@ -72,9 +103,9 @@ func (s *Server) close() {
 // NewServer creates a new websocket server that listens to client requests
 func NewServer(prefix string) *Server {
 	return &Server{
-		Prefix:      prefix,
+		prefix:      prefix,
 		HasShutdown: make(chan struct{}),
-		clients:     make([]*websocket.Conn, 0),
+		clients:     make(map[int]*wsClient),
 		renderCh:    make(chan string),
 		doneCh:      make(chan struct{}),
 	}
