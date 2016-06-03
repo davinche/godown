@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/davinche/godown/server"
+	"github.com/kardianos/osext"
 )
 
 func killServer(port string) (*http.Response, error) {
@@ -68,11 +69,17 @@ func main() {
 	}
 
 	// parse the html template
-	templates := template.Must(template.ParseFiles("index.html"))
+	binDir, err := osext.ExecutableFolder()
+	if err != nil {
+		fmt.Println("error: could not determine binary folder")
+		os.Exit(1)
+	}
+	fmt.Println(binDir)
+	templates := template.Must(template.ParseFiles(binDir + "/index.html"))
 
 	// Start the websocket server
 	server := server.NewServer("/connect", file)
-	static := http.FileServer(http.Dir("./static"))
+	static := http.FileServer(http.Dir(binDir + "/static"))
 	tStruct := struct{ Port string }{Port: strPort}
 	serveRequest := func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "DELETE" {
