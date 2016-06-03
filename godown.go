@@ -107,7 +107,7 @@ func main() {
 				os.Exit(1)
 			}
 		}
-		<-time.After(time.Second * 5)
+		<-time.After(time.Millisecond * 100)
 		fmt.Printf("error: could not start server: %q", http.ListenAndServe(":"+strPort, nil))
 		os.Exit(1)
 	}()
