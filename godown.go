@@ -15,6 +15,15 @@ import (
 	"github.com/davinche/godown/server"
 )
 
+func killServer(port string) (*http.Response, error) {
+	client := http.Client{}
+	req, err := http.NewRequest("DELETE", "http://localhost:"+port, nil)
+	if err != nil {
+		return nil, err
+	}
+	return client.Do(req)
+}
+
 func main() {
 	// Args
 	port := flag.Int("p", 1337, "GoDown Port")
@@ -46,14 +55,10 @@ func main() {
 
 	// stop command issued: send a stop request to the server
 	if command == "stop" {
-		client := http.Client{}
-		req, err := http.NewRequest("DELETE", "http://localhost:"+strPort, nil)
-		if err != nil {
+		if _, err := killServer(strPort); err != nil {
 			fmt.Printf("error: could not create stop server request: %q\n", err)
 			return
 		}
-		client.Do(req)
-		return
 	}
 
 	file := flag.Arg(1)
@@ -71,6 +76,7 @@ func main() {
 	tStruct := struct{ Port string }{Port: strPort}
 	serveRequest := func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "DELETE" {
+			w.WriteHeader(http.StatusOK)
 			doneCh <- struct{}{}
 		} else {
 			templates.ExecuteTemplate(w, "index.html", tStruct)
@@ -79,7 +85,25 @@ func main() {
 	http.Handle("/static/", http.StripPrefix("/static/", static))
 	http.HandleFunc("/", serveRequest)
 	go server.Listen()
-	go http.ListenAndServe(":"+strPort, nil)
+	go func() {
+		// try to listen from the port
+		err := http.ListenAndServe(":"+strPort, nil)
+		if err != nil {
+			fmt.Printf("error: could not start server, will retry after kill: %q\n", err)
+			resp, err := killServer(strPort)
+			if err != nil {
+				fmt.Printf("error: could not start server: %q\n", err)
+				os.Exit(1)
+			}
+			if resp.StatusCode != http.StatusOK {
+				fmt.Printf("error: could not stop existing application on port %q\n", strPort)
+				os.Exit(1)
+			}
+		}
+		<-time.After(time.Second * 5)
+		fmt.Printf("error: could not start server: %q", http.ListenAndServe(":"+strPort, nil))
+		os.Exit(1)
+	}()
 
 	// Launch the browser
 	var args []string

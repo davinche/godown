@@ -12,7 +12,6 @@ import (
 
 var (
 	maxClients int
-	mu         sync.Mutex
 )
 
 type renderString struct {
@@ -21,7 +20,8 @@ type renderString struct {
 
 // Server is a websocket server
 type Server struct {
-	clients     map[int]*wsClient
+	clients map[int]*wsClient
+	sync.Mutex
 	renderCh    chan string
 	doneCh      chan struct{}
 	HasShutdown chan struct{}
@@ -101,21 +101,18 @@ func (s *Server) sendToClient(c *wsClient, msg string) error {
 }
 
 func (s *Server) addClient(ws *websocket.Conn) *wsClient {
-	// get id
-	mu.Lock()
-	id := maxClients
-	maxClients++
-	mu.Unlock()
-
+	s.Lock()
 	// create client
 	client := &wsClient{
-		id: id,
+		id: maxClients,
 		ws: ws,
 	}
 	s.clients[client.id] = client
-	rendered, err := getRenderedFromFile(s.file)
+	maxClients++
+	s.Unlock()
 
 	// Send rendered to client
+	rendered, err := getRenderedFromFile(s.file)
 	if err == nil {
 		s.sendToClient(client, rendered)
 	}
@@ -123,7 +120,9 @@ func (s *Server) addClient(ws *websocket.Conn) *wsClient {
 }
 
 func (s *Server) delClient(c *wsClient) {
+	s.Lock()
 	delete(s.clients, c.id)
+	s.Unlock()
 }
 
 func (s *Server) close() {
