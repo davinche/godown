@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"html/template"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -80,12 +81,20 @@ func main() {
 	// Start the websocket server
 	server := server.NewServer("/connect", file)
 	static := http.FileServer(http.Dir(binDir + "/static"))
-	tStruct := struct{ Port string }{Port: strPort}
 	serveRequest := func(w http.ResponseWriter, r *http.Request) {
+		var host string
+		if host, _, err = net.SplitHostPort(r.Host); err != nil {
+			host = "localhost"
+		}
+		tStruct := struct {
+			Host string
+			Port string
+		}{host, strPort}
 		if r.Method == "DELETE" {
 			w.WriteHeader(http.StatusOK)
 			doneCh <- struct{}{}
 		} else {
+
 			templates.ExecuteTemplate(w, "index.html", tStruct)
 		}
 	}
