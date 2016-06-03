@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"html/template"
 	"net/http"
 	"os"
 	"os/exec"
@@ -18,18 +19,18 @@ func main() {
 	// Args
 	port := flag.Int("p", 1337, "GoDown Port")
 	browser := flag.String("b", "", "Browser to preview with")
-	doneCh := make(chan struct{})
 	flag.Parse()
 	strPort := strconv.Itoa(*port)
+	doneCh := make(chan struct{})
 
 	help := func() {
-		fmt.Fprintln(os.Stdout, "usage: godown {COMMANDS} <PATH> {FLAGS}\n")
+		fmt.Fprintln(os.Stdout, "usage: godown {FLAGS} [COMMANDS] <PATH>\n")
 		fmt.Fprintln(os.Stdout, "  Watches changes to a file and previews the markdown in the browser\n")
-		fmt.Fprintln(os.Stdout, "COMMANDS:\n")
-		fmt.Fprintf(os.Stdout, "  %-15s%s", "start PATH", "starts watching a file given a path\n")
-		fmt.Fprintf(os.Stdout, "  %-15s%s", "stop", "stops the GoDown process\n\n")
-		fmt.Fprintln(os.Stdout, "FLAGS:")
+		fmt.Fprintln(os.Stdout, "FLAGS:\n")
 		flag.PrintDefaults()
+		fmt.Fprintln(os.Stdout, "\nCOMMANDS:\n")
+		fmt.Fprintf(os.Stdout, "  %-15s%s", "start PATH", "starts watching a file given a path\n")
+		fmt.Fprintf(os.Stdout, "  %-15s%s", "stop", "stops the GoDown process\n")
 	}
 
 	if len(flag.Args()) < 1 {
@@ -61,16 +62,21 @@ func main() {
 		return
 	}
 
+	// parse the html template
+	templates := template.Must(template.ParseFiles("index.html"))
+
 	// Start the websocket server
 	server := server.NewServer("/connect", file)
 	static := http.FileServer(http.Dir("./static"))
+	tStruct := struct{ Port string }{Port: strPort}
 	serveRequest := func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "DELETE" {
 			doneCh <- struct{}{}
 		} else {
-			static.ServeHTTP(w, r)
+			templates.ExecuteTemplate(w, "index.html", tStruct)
 		}
 	}
+	http.Handle("/static/", http.StripPrefix("/static/", static))
 	http.HandleFunc("/", serveRequest)
 	go server.Listen()
 	go http.ListenAndServe(":"+strPort, nil)
