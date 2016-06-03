@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"os/exec"
@@ -13,7 +12,6 @@ import (
 	"time"
 
 	"github.com/davinche/godown/server"
-	"github.com/russross/blackfriday"
 )
 
 func main() {
@@ -64,7 +62,7 @@ func main() {
 	}
 
 	// Start the websocket server
-	server := server.NewServer("/connect")
+	server := server.NewServer("/connect", file)
 	static := http.FileServer(http.Dir("./static"))
 	serveRequest := func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "DELETE" {
@@ -113,14 +111,6 @@ func main() {
 		return
 	}
 
-	// render once
-	fileStr, err := ioutil.ReadFile(file)
-	if err == nil {
-		renderedStr := blackfriday.MarkdownCommon(fileStr)
-		<-time.After(time.Second * 2)
-		server.Broadcast(string(renderedStr))
-	}
-
 	// Loop watch
 	for {
 		select {
@@ -135,14 +125,8 @@ func main() {
 			}
 			// something changed
 			if newStat.Size() != stat.Size() || newStat.ModTime() != stat.ModTime() {
-				fmt.Println("change detected: rerendering")
-				fileStr, err := ioutil.ReadFile(file)
-				if err == nil {
-					renderedStr := blackfriday.MarkdownCommon(fileStr)
-					server.Broadcast(string(renderedStr))
-					stat = newStat
-					continue
-				}
+				server.Broadcast()
+				stat = newStat
 			}
 		}
 	}

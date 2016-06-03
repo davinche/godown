@@ -2,10 +2,17 @@ package server
 
 import (
 	"fmt"
-	"io"
+	"io/ioutil"
 	"net/http"
+	"sync"
 
+	"github.com/russross/blackfriday"
 	"golang.org/x/net/websocket"
+)
+
+var (
+	maxClients int
+	mu         sync.Mutex
 )
 
 type renderString struct {
@@ -19,11 +26,20 @@ type Server struct {
 	doneCh      chan struct{}
 	HasShutdown chan struct{}
 	prefix      string
+	file        string
 }
 
 type wsClient struct {
 	id int
 	ws *websocket.Conn
+}
+
+func getRenderedFromFile(file string) (string, error) {
+	fileStr, err := ioutil.ReadFile(file)
+	if err != nil {
+		return "", err
+	}
+	return string(blackfriday.MarkdownCommon(fileStr)), nil
 }
 
 func (s *Server) handleConn(ws *websocket.Conn) {
@@ -32,11 +48,7 @@ func (s *Server) handleConn(ws *websocket.Conn) {
 		var msg string
 		err := websocket.Message.Receive(ws, &msg)
 		if err != nil {
-			if err == io.EOF {
-				s.delClient(c)
-			} else {
-				fmt.Printf("error reading from websocket: %q\n", err)
-			}
+			s.delClient(c)
 		}
 	}
 }
@@ -59,8 +71,13 @@ func (s *Server) Listen() {
 }
 
 // Broadcast sends the Markdown rendered updates to all websocket clients
-func (s *Server) Broadcast(renderedStr string) {
-	s.renderCh <- renderedStr
+func (s *Server) Broadcast() {
+	rendered, err := getRenderedFromFile(s.file)
+	if err != nil {
+		fmt.Printf("error reading file: %q", err)
+		return
+	}
+	s.renderCh <- rendered
 }
 
 // Done proceeds to signal the shutdown of the websocket server
@@ -69,22 +86,39 @@ func (s *Server) Done() {
 }
 
 func (s *Server) broadcast(renderedStr string) {
-	rendered := renderString{renderedStr}
-	for id, c := range s.clients {
-		err := websocket.JSON.Send(c.ws, rendered)
+	for _, c := range s.clients {
+		err := s.sendToClient(c, renderedStr)
 		if err != nil {
 			fmt.Printf("error sending data: %q\n", err)
-			delete(s.clients, id)
+			s.delClient(c)
 		}
 	}
 }
 
+func (s *Server) sendToClient(c *wsClient, msg string) error {
+	rendered := renderString{msg}
+	return websocket.JSON.Send(c.ws, rendered)
+}
+
 func (s *Server) addClient(ws *websocket.Conn) *wsClient {
+	// get id
+	mu.Lock()
+	id := maxClients
+	maxClients++
+	mu.Unlock()
+
+	// create client
 	client := &wsClient{
-		id: len(s.clients),
+		id: id,
 		ws: ws,
 	}
 	s.clients[client.id] = client
+	rendered, err := getRenderedFromFile(s.file)
+
+	// Send rendered to client
+	if err == nil {
+		s.sendToClient(client, rendered)
+	}
 	return client
 }
 
@@ -101,9 +135,10 @@ func (s *Server) close() {
 }
 
 // NewServer creates a new websocket server that listens to client requests
-func NewServer(prefix string) *Server {
+func NewServer(prefix, file string) *Server {
 	return &Server{
 		prefix:      prefix,
+		file:        file,
 		HasShutdown: make(chan struct{}),
 		clients:     make(map[int]*wsClient),
 		renderCh:    make(chan string),
