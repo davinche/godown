@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"./server"
+	"github.com/davinche/godown/server"
 	"github.com/russross/blackfriday"
 )
 
@@ -117,6 +117,7 @@ func main() {
 	fileStr, err := ioutil.ReadFile(file)
 	if err == nil {
 		renderedStr := blackfriday.MarkdownCommon(fileStr)
+		<-time.After(time.Second * 2)
 		server.Broadcast(string(renderedStr))
 	}
 
