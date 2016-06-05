@@ -6,32 +6,16 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/davinche/godown/markdown"
 	"github.com/russross/blackfriday"
 	"golang.org/x/net/websocket"
 )
 
-var (
-	maxClients int
-)
-
+// ----------------------------------------------------------------------------
+// Utility
+// ----------------------------------------------------------------------------
 type renderString struct {
 	Render string `json:"render"`
-}
-
-// Server is a websocket server
-type Server struct {
-	clients map[int]*wsClient
-	sync.Mutex
-	renderCh    chan string
-	doneCh      chan struct{}
-	HasShutdown chan struct{}
-	prefix      string
-	file        string
-}
-
-type wsClient struct {
-	id int
-	ws *websocket.Conn
 }
 
 func getRenderedFromFile(file string) (string, error) {
@@ -42,105 +26,138 @@ func getRenderedFromFile(file string) (string, error) {
 	return string(blackfriday.MarkdownCommon(fileStr)), nil
 }
 
-func (s *Server) handleConn(ws *websocket.Conn) {
-	c := s.addClient(ws)
-	for {
-		var msg string
-		err := websocket.Message.Receive(ws, &msg)
-		if err != nil {
-			s.delClient(c)
-		}
-	}
+// ----------------------------------------------------------------------------
+// Data
+// ----------------------------------------------------------------------------
+
+// track subscribers to a file
+type fileSubscribers struct {
+	file *markdown.File
+
+	clients map[*websocket.Conn]struct{}
+	sync.Mutex
 }
 
-// Listen begins listening for new markdown strings to broadcast
-func (s *Server) Listen() {
-	fmt.Println("Markdown Websocket Server Listening...")
-	http.Handle(s.prefix, websocket.Handler(s.handleConn))
-
-	// loop check for new strings to push to clients
-	for {
-		select {
-		case renderedStr := <-s.renderCh:
-			s.broadcast(renderedStr)
-		case <-s.doneCh:
-			s.close()
-			return
-		}
-	}
-}
-
-// Broadcast sends the Markdown rendered updates to all websocket clients
-func (s *Server) Broadcast() {
-	rendered, err := getRenderedFromFile(s.file)
+// broadcast all changes to subscribers
+func (f *fileSubscribers) broadcast() {
+	fileStr, err := getRenderedFromFile(f.file.Path)
 	if err != nil {
 		fmt.Printf("error reading file: %q", err)
 		return
 	}
-	s.renderCh <- rendered
+	renderFmt := renderString{fileStr}
+	// loop and write
+	f.Lock()
+	defer f.Unlock()
+	for ws := range f.clients {
+		websocket.JSON.Send(ws, renderFmt)
+	}
 }
 
-// Done proceeds to signal the shutdown of the websocket server
-func (s *Server) Done() {
-	s.doneCh <- struct{}{}
+func (f *fileSubscribers) add(ws *websocket.Conn) {
+	f.Lock()
+	defer f.Unlock()
+	f.clients[ws] = struct{}{}
+	fileStr, err := getRenderedFromFile(f.file.Path)
+	if err != nil {
+		fmt.Printf("error reading file: %q", err)
+		return
+	}
+	renderFmt := renderString{fileStr}
+	websocket.JSON.Send(ws, renderFmt)
 }
 
-func (s *Server) broadcast(renderedStr string) {
-	for _, c := range s.clients {
-		err := s.sendToClient(c, renderedStr)
-		if err != nil {
-			fmt.Printf("error sending data: %q\n", err)
-			s.delClient(c)
+func (f *fileSubscribers) del(ws *websocket.Conn) (shouldDelete bool) {
+	f.Lock()
+	defer f.Unlock()
+	delete(f.clients, ws)
+	if len(f.clients) == 0 {
+		return true
+	}
+	return false
+}
+
+// Server is a websocket server
+type Server struct {
+	prefix string
+
+	catalog map[string]*fileSubscribers
+	sync.Mutex
+}
+
+// CreateFileSubscriber creates a new registry for a file and it's subscribed clients
+func (s *Server) CreateFileSubscriber(file *markdown.File) {
+	s.Lock()
+	defer s.Unlock()
+	if _, ok := s.catalog[file.ID]; !ok {
+		s.catalog[file.ID] = &fileSubscribers{
+			file:    file,
+			clients: make(map[*websocket.Conn]struct{}),
 		}
 	}
 }
 
-func (s *Server) sendToClient(c *wsClient, msg string) error {
-	rendered := renderString{msg}
-	return websocket.JSON.Send(c.ws, rendered)
+// Register begins listening for new markdown strings to broadcast
+func (s *Server) Register(prefix string) {
+	fmt.Println("Markdown Websocket Server Listening...")
+	// http.Handle(s.prefix, websocket.Handler(s.handleConn))
+	http.HandleFunc(prefix, func(w http.ResponseWriter, r *http.Request) {
+		// Make sure a file id is specified
+		fileID := r.URL.Query().Get("id")
+		if fileID == "" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		// create the websocket handler
+		handleWS := func(ws *websocket.Conn) {
+			hasAdded := s.addClient(fileID, ws)
+			if hasAdded {
+				for {
+					var msg string
+					err := websocket.Message.Receive(ws, &msg)
+					if err != nil {
+						s.deleteClient(fileID, ws)
+						return
+					}
+				}
+			}
+		}
+		websocket.Handler(handleWS).ServeHTTP(w, r)
+	})
 }
 
-func (s *Server) addClient(ws *websocket.Conn) *wsClient {
+func (s *Server) addClient(fileID string, ws *websocket.Conn) (success bool) {
 	s.Lock()
-	// create client
-	client := &wsClient{
-		id: maxClients,
-		ws: ws,
+	defer s.Unlock()
+	if s.catalog[fileID] == nil {
+		return false
 	}
-	s.clients[client.id] = client
-	maxClients++
-	s.Unlock()
-
-	// Send rendered to client
-	rendered, err := getRenderedFromFile(s.file)
-	if err == nil {
-		s.sendToClient(client, rendered)
-	}
-	return client
+	s.catalog[fileID].add(ws)
+	return true
 }
 
-func (s *Server) delClient(c *wsClient) {
+func (s *Server) deleteClient(fileID string, ws *websocket.Conn) {
 	s.Lock()
-	delete(s.clients, c.id)
-	s.Unlock()
+	defer s.Unlock()
+	if s.catalog[fileID] == nil {
+		return
+	}
 }
 
-func (s *Server) close() {
-	fmt.Println("Shutting Down...")
-	for _, c := range s.clients {
-		c.ws.Close()
+// Broadcast to all subscribers of fileID the new file
+func (s *Server) Broadcast(file *markdown.File) {
+	fSubs := s.catalog[file.ID]
+	if fSubs != nil {
+		fSubs.broadcast()
 	}
-	s.HasShutdown <- struct{}{}
 }
 
 // NewServer creates a new websocket server that listens to client requests
-func NewServer(prefix, file string) *Server {
-	return &Server{
-		prefix:      prefix,
-		file:        file,
-		HasShutdown: make(chan struct{}),
-		clients:     make(map[int]*wsClient),
-		renderCh:    make(chan string),
-		doneCh:      make(chan struct{}),
+func NewServer(f *markdown.File) *Server {
+	s := &Server{
+		catalog: make(map[string]*fileSubscribers),
 	}
+	s.CreateFileSubscriber(f)
+	return s
 }

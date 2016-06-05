@@ -9,7 +9,7 @@
 	<script src="/static/highlight.min.js"></script>
 	<script>
 		window.onload = function() {
-			var ws = new WebSocket('ws://{{.Host}}:{{.Port}}/connect');
+			var ws = new WebSocket('ws://{{.Host}}:{{.Port}}/connect?id={{.FileID}}');
 			var container = document.getElementById('container');
 			ws.onmessage = function(e) {
 				var html = JSON.parse(e.data).render;
