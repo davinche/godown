@@ -101,12 +101,14 @@ func listenAndServe(port string, f *markdown.File, done chan struct{}) {
 
 func help() {
 	fmt.Fprintln(os.Stdout, "usage: godown {FLAGS} [COMMANDS] <PATH>\n")
-	fmt.Fprintln(os.Stdout, "  Watches changes to a file and previews the markdown in the browser\n")
+	fmt.Fprintln(os.Stdout, "  Watches a markdown file for changes and previews it in the browser.\n")
 	fmt.Fprintln(os.Stdout, "FLAGS:\n")
 	flag.PrintDefaults()
 	fmt.Fprintln(os.Stdout, "\nCOMMANDS:\n")
-	fmt.Fprintf(os.Stdout, "  %-15s%s", "start PATH", "starts watching a file given a path\n")
-	fmt.Fprintf(os.Stdout, "  %-15s%s", "stop", "stops the GoDown process\n")
+	fmt.Fprintln(os.Stdout, "  start <PATH>")
+	fmt.Fprintf(os.Stdout, "        %s\n", "Starts watching a file given a path.")
+	fmt.Fprintln(os.Stdout, "  stop <PATH>")
+	fmt.Fprintf(os.Stdout, "        %s\n", "*optional* path: Stops watching a file if a path is given, otherwise stops the Godown daemon.")
 }
 
 func main() {

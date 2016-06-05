@@ -1,14 +1,26 @@
-GoDown: Markdown Previewer
+Godown: Markdown Previewer
 ==========================
 
-GoDown is a markdown previewer (using websockets) that uses the [BlackFriday][bf] markdown processor to output HTML to all of it's connected clients.
+![gif](https://github.com/davinche/godown-vim/blob/static/gif.gif?raw=true)
 
-GoDown is heavily inspired by [Livedown][ld], a markdown previewer that is written in NodeJS.
+Godown is a markdown previewer written in Go. The live preview is done using websockets. The markdown parsing is done by the [blackfriday][bf] go library.
 
+GoDown is heavily inspired by [Livedown][ld] (previewer written in NodeJS).
 
-## TODO ##
-- Finish the websocket server (allow for browser choice like livedown)
-- Write a vim plugin to do instant preview
+## Installation
+
+Assuming the `$GOPATH/bin` is in your PATH, simply install by running `make`.
+
+## Usage
+
+Run the tool for usage information.
+
+```
+godown
+```
+
+## License
+MIT
 
 
 [bf]: https://github.com/russross/blackfriday
