@@ -67,7 +67,7 @@ func launchBrowser(browser string, port string, file *markdown.File) {
 			args = append(args, "xdg-open")
 			break
 		case "windows":
-			args = append(args, "start")
+			args = append(args, "cmd", "/C", "start", "/B")
 			break
 		}
 	} else {
