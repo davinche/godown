@@ -23,14 +23,31 @@ type Server struct {
 func (s *Server) CreateSubscriber(source subscribe.Source) {
 	s.Lock()
 	defer s.Unlock()
-	if _, ok := s.catalog[source.GetID()]; !ok {
-		// s.catalog[file.ID] = subscribe.NewFile(file)
-		switch source.(type) {
-		case *markdown.File:
+	switch source.(type) {
+	case *markdown.File:
+		if _, ok := s.catalog[source.GetID()]; !ok {
 			s.catalog[source.GetID()] = subscribe.NewFile(source.(*markdown.File))
-		case *memory.File:
-			s.catalog[source.GetID()] = subscribe.NewMem(source.(*memory.File))
 		}
+	case *memory.File:
+		if c, ok := s.catalog[source.GetID()]; !ok {
+			s.catalog[source.GetID()] = subscribe.NewMem(source.(*memory.File))
+		} else {
+			// try to assert memory tracker
+			if m, ok := c.(*subscribe.Mem); ok {
+				m.Update(source.(*memory.File))
+				m.Broadcast()
+			}
+		}
+	}
+}
+
+// RemoveSubscriber removes the catalog of subscribers from being tracked
+func (s *Server) RemoveSubscriber(id string) {
+	s.Lock()
+	defer s.Unlock()
+	if c, ok := s.catalog[id]; ok {
+		c.Close()
+		delete(s.catalog, id)
 	}
 }
 

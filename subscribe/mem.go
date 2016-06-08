@@ -41,3 +41,8 @@ func (m *Mem) Add(ws *websocket.Conn) {
 	renderFmt := RenderFormat{rendered}
 	websocket.JSON.Send(ws, renderFmt)
 }
+
+// Update replaces the current in-memory file with a new one
+func (m *Mem) Update(f *memory.File) {
+	m.file = f
+}

@@ -150,6 +150,7 @@ func main() {
 			// are we removing one file?
 			if fID != "" {
 				go watchMonitor.RemoveWatcher(fID)
+				socketServer.RemoveSubscriber(fID)
 				w.WriteHeader(http.StatusOK)
 				return
 			}
