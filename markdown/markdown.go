@@ -3,15 +3,19 @@ package markdown
 import (
 	"crypto/sha1"
 	"fmt"
-	"io"
 	"path/filepath"
 )
 
 // File holds the path to a file it's identifer. The identifier is used
 // to communicate to the web server which file to serve.
 type File struct {
+	id   string
 	Path string
-	ID   string
+}
+
+// GetID returns the identifier for the file
+func (f *File) GetID() string {
+	return f.id
 }
 
 // NewFile is the constructor for the object that holds the filepath
@@ -22,13 +26,9 @@ func NewFile(path string) (*File, error) {
 		return nil, err
 	}
 
-	hash := sha1.New()
-	if _, err := io.WriteString(hash, absPath); err != nil {
-		return nil, err
-	}
-	ID := fmt.Sprintf("%x", hash.Sum(nil))
+	id := fmt.Sprintf("%x", sha1.Sum([]byte(absPath)))
 	return &File{
 		Path: absPath,
-		ID:   ID,
+		id:   id,
 	}, nil
 }

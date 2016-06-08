@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"html/template"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"os"
@@ -15,107 +16,20 @@ import (
 	"strings"
 
 	"github.com/davinche/godown/markdown"
+	"github.com/davinche/godown/memory"
 	"github.com/davinche/godown/server"
+	"github.com/davinche/godown/subscribe"
 	"github.com/davinche/godown/watcher"
 	"github.com/kardianos/osext"
 )
 
-// Helper to make an HTTP DEL request to kill the server
-func killServer(port string) (*http.Response, error) {
-	client := http.Client{}
-	req, err := http.NewRequest("DELETE", "http://localhost:"+port, nil)
-	if err != nil {
-		return nil, err
-	}
-	return client.Do(req)
-}
-
-func killWatcher(port string, fileID string) (*http.Response, error) {
-	client := http.Client{}
-	req, err := http.NewRequest("DELETE", "http://localhost:"+port+"?id="+fileID, nil)
-	if err != nil {
-		return nil, err
-	}
-	return client.Do(req)
-}
-
-// Helper to add a new file to be watched on an existing server
-func addFile(port string, f *markdown.File) (*http.Response, error) {
-	watchRequest := watcher.WatchFileRequest{File: f.Path}
-	marshalled, err := json.Marshal(watchRequest)
-	if err != nil {
-		return nil, err
-	}
-
-	client := http.Client{}
-	req, err := http.NewRequest("POST", "http://localhost:"+port, bytes.NewBuffer(marshalled))
-	if err != nil {
-		return nil, err
-	}
-	return client.Do(req)
-}
-
-func launchBrowser(browser string, port string, file *markdown.File) {
-	// Launch the browser
-	var args []string
-	if browser == "" {
-		switch runtime.GOOS {
-		case "darwin":
-			args = append(args, "open", "-g")
-			break
-		case "linux":
-			args = append(args, "xdg-open")
-			break
-		case "windows":
-			args = append(args, "cmd", "/C", "start", "/B")
-			break
-		}
-	} else {
-		args = append(args, browser)
-	}
-
-	if len(args) == 0 {
-		fmt.Println("warning: no open command")
-	} else {
-		args = append(args, "http://localhost:"+port+"?id="+file.ID)
-		command := exec.Command(args[0], args[1:]...)
-		err := command.Start()
-		if err != nil {
-			fmt.Printf("error: could not open url: %v\n", err)
-		}
-	}
-}
-
-func listenAndServe(port string, f *markdown.File, done chan struct{}) {
-	// try to listen from the port
-	err := http.ListenAndServe(":"+port, nil)
-	if err != nil {
-		fmt.Printf("error: could not start server; trying to add to existing server: %q\n", err)
-		req, err := addFile(port, f)
-		if err != nil || req.StatusCode != http.StatusOK {
-			fmt.Printf("error: could not register file to watch with server: %q\n", err)
-		}
-		done <- struct{}{}
-	}
-}
-
-func help() {
-	fmt.Fprintln(os.Stdout, "usage: godown {FLAGS} [COMMANDS] <PATH>\n")
-	fmt.Fprintln(os.Stdout, "  Watches a markdown file for changes and previews it in the browser.\n")
-	fmt.Fprintln(os.Stdout, "FLAGS:\n")
-	flag.PrintDefaults()
-	fmt.Fprintln(os.Stdout, "\nCOMMANDS:\n")
-	fmt.Fprintln(os.Stdout, "  start <PATH>")
-	fmt.Fprintf(os.Stdout, "        %s\n", "Starts watching a file given a path.")
-	fmt.Fprintln(os.Stdout, "  stop <PATH>")
-	fmt.Fprintf(os.Stdout, "        %s\n", "*optional* path: Stops watching a file if a path is given, otherwise stops the Godown daemon.")
-}
-
 func main() {
 	// Args
-	port := flag.Int("p", 1337, "GoDown Port")
-	browser := flag.String("b", "", "Browser to preview with")
+	port := flag.Int("p", 1337, "Port")
+	browser := flag.String("b", "", "Specify the browser to preview with.")
+	shouldLaunch := flag.Bool("l", false, "Open the preview in a browser.")
 	flag.Parse()
+
 	strPort := strconv.Itoa(*port)
 	doneCh := make(chan struct{})
 
@@ -125,43 +39,25 @@ func main() {
 	}
 
 	command := strings.ToLower(flag.Arg(0))
-	if command != "start" && command != "stop" {
+	if command != "start" && command != "stop" && command != "send" {
 		help()
 		return
 	}
 
-	file := flag.Arg(1)
+	// ------------------------------------------------------------------------
+	// Parse the Command ------------------------------------------------------
+	// ------------------------------------------------------------------------
+
 	// stop command issued: send a stop request to the server
 	if command == "stop" {
 		fmt.Println("stopping")
-		if file != "" {
-			markdownFile, err := markdown.NewFile(file)
-			fmt.Println("stopping file " + markdownFile.Path)
-			if err != nil {
-				fmt.Printf("error: could not obtain markdown file: %q\n", err)
-				return
-			}
-			if _, err = killWatcher(strPort, markdownFile.ID); err != nil {
-				fmt.Printf("error: could not create stop file watcher: %q\n", err)
-			}
-			return
-		}
-
-		if _, err := killServer(strPort); err != nil {
-			fmt.Printf("error: could not create stop server request: %q\n", err)
-			return
-		}
-	}
-
-	// start command
-	if file == "" {
-		help()
+		stop(flag.Arg(1), strPort)
 		return
 	}
 
-	markdownFile, err := markdown.NewFile(file)
-	if err != nil {
-		fmt.Printf("error: could not obtain markdown file: %q\n", err)
+	// Start and Send Commands require at least 1 positional argument
+	if flag.Arg(1) == "" {
+		help()
 		return
 	}
 
@@ -171,22 +67,23 @@ func main() {
 		fmt.Println("error: could not determine binary folder")
 		os.Exit(1)
 	}
-	fmt.Println(binDir)
 	templates := template.Must(template.ParseFiles(binDir + "/index.html"))
 
 	// ------------------------------------------------------------------------
 	// Server Registration ----------------------------------------------------
 	// ------------------------------------------------------------------------
 
-	// Watcher ----------------------------------------------------------------
+	// Watcher
 	watchMonitor := watcher.NewWatchMonitor()
-	// Websocket --------------------------------------------------------------
-	socketServer := server.NewServer(markdownFile)
+	// Websocket
+	socketServer := server.NewServer()
 	socketServer.Register("/connect")
-	// Static Files -----------------------------------------------------------
+	// Static Files
 	static := http.FileServer(http.Dir(binDir + "/static"))
-	// API --------------------------------------------------------------------
+
+	// API
 	serveRequest := func(w http.ResponseWriter, r *http.Request) {
+
 		// watch another file
 		if r.Method == "POST" {
 			defer r.Body.Close()
@@ -207,12 +104,37 @@ func main() {
 
 			// create a new watcher
 			watchMonitor.AddWatcher(markdownFile)
-			socketServer.CreateFileSubscriber(markdownFile)
+			socketServer.CreateSubscriber(markdownFile)
 			w.WriteHeader(http.StatusOK)
 			return
 		}
 
 		fID := r.URL.Query().Get("id")
+		// Add a file to memory?
+		if r.Method == "PUT" {
+			// read the body
+			defer r.Body.Close()
+			data, err := ioutil.ReadAll(r.Body)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte("error: could not read markdown body"))
+				return
+			}
+
+			// create new inmemory markdown file
+			memoryFile, err := memory.NewFile(fID, data)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte("error: could not create new in-memory markdown file"))
+				return
+			}
+
+			// create new registry
+			socketServer.CreateSubscriber(memoryFile)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
 		// shutting down the server?
 		if r.Method == "DELETE" {
 			// are we removing one file?
@@ -246,23 +168,210 @@ func main() {
 		templates.ExecuteTemplate(w, "index.html", tStruct)
 	}
 
+	// ------------------------------------------------------------------------
+	// Start Server Processes--------------------------------------------------
+	// ------------------------------------------------------------------------
 	fileChanges := make(chan *markdown.File)
-	watchMonitor.AddWatcher(markdownFile)
+	http.HandleFunc("/", serveRequest)
+	http.Handle("/static/", http.StripPrefix("/static/", static))
+	isDaemon := listenAndServe(strPort)
 	go watchMonitor.Start(fileChanges)
 
-	http.Handle("/static/", http.StripPrefix("/static/", static))
-	http.HandleFunc("/", serveRequest)
-	go listenAndServe(strPort, markdownFile, doneCh)
-	launchBrowser(*browser, strPort, markdownFile)
-
-	// Loop message from watcher
-	for {
-		select {
-		case <-doneCh:
-			watchMonitor.Done()
+	// START THE SERVER -------------------------------------------------------
+	if command == "start" {
+		markdownFile, err := markdown.NewFile(flag.Arg(1))
+		if err != nil {
+			fmt.Printf("error: could not obtain markdown file: %q\n", err)
+			os.Exit(1)
 			return
-		case changes := <-fileChanges:
-			socketServer.Broadcast(changes)
+		}
+		resp, err := addFile(strPort, markdownFile)
+		if err != nil || resp.StatusCode != http.StatusOK {
+			fmt.Printf("error: could not add markdown file to the watch list: %q\n", err)
+			os.Exit(1)
+			return
+		}
+
+		if *shouldLaunch {
+			launchBrowser(*browser, strPort, markdownFile)
 		}
 	}
+
+	if command == "send" {
+		id := flag.Arg(1)
+		data, err := ioutil.ReadAll(os.Stdin)
+		if err != nil {
+			fmt.Printf("error: could not read in data: %q\n", err)
+			os.Exit(1)
+			return
+		}
+
+		file, err := memory.NewFile(id, data)
+		if err != nil {
+			fmt.Printf("error: could not prepare data to send to server: %q\n", err)
+			os.Exit(1)
+			return
+		}
+
+		req, err := addData(strPort, id, file.Content)
+		if err != nil || req.StatusCode != http.StatusOK {
+			fmt.Printf("error: there was an error in the request to the server: e=%v; code=%v\n", err, req.StatusCode)
+			os.Exit(1)
+			return
+		}
+
+		if *shouldLaunch {
+			launchBrowser(*browser, strPort, file)
+		}
+	}
+
+	if isDaemon {
+		// Loop message from watcher
+		for {
+			select {
+			case <-doneCh:
+				watchMonitor.Done()
+				return
+			case changes := <-fileChanges:
+				socketServer.Broadcast(changes)
+			}
+		}
+	}
+
+}
+
+// ----------------------------------------------------------------------------
+// Helpers --------------------------------------------------------------------
+// ----------------------------------------------------------------------------
+
+func help() {
+	fmt.Fprintln(os.Stdout, "usage: godown {FLAGS} [COMMANDS] <PATH>\n")
+	fmt.Fprintln(os.Stdout, "  Watches a markdown file for changes and previews it in the browser.\n")
+	fmt.Fprintln(os.Stdout, "FLAGS:\n")
+	flag.PrintDefaults()
+	fmt.Fprintln(os.Stdout, "\nCOMMANDS:\n")
+	fmt.Fprintln(os.Stdout, "  start <PATH>")
+	fmt.Fprintf(os.Stdout, "        %s\n", "Starts watching a file at the given path.")
+	fmt.Fprintln(os.Stdout, "  stop <PATH>")
+	fmt.Fprintf(os.Stdout, "        %s\n", "*optional* path: "+
+		"Stops watching a file if given a path or terminates the Godown daemon.")
+	fmt.Fprintln(os.Stdout, "  id <PATH>")
+	fmt.Fprintf(os.Stdout, "        %s\n", "Prints the unique identifier for the given path.")
+	fmt.Fprintln(os.Stdout, "  send [ID]")
+	fmt.Fprintf(os.Stdout, "        %s\n", "Given an identifier and piped markdown data, "+
+		"send it to the daemon for rendering.")
+}
+
+// Send DELETE to server to either: stop watching a file or kill the server
+func stop(filePath string, port string) {
+	if filePath != "" {
+		fmt.Printf("stopping file %q\n", filePath)
+		markdownFile, err := markdown.NewFile(filePath)
+		if err != nil {
+			fmt.Printf("error: could not obtain markdown file: %q\n", err)
+			return
+		}
+		if _, err = killWatcher(port, markdownFile.GetID()); err != nil {
+			fmt.Printf("error: could not create stop file watcher: %q\n", err)
+		}
+		return
+	}
+
+	if _, err := killServer(port); err != nil {
+		fmt.Printf("error: could not create stop server request: %q\n", err)
+		return
+	}
+}
+
+// Try to start the daemon; return whether or not it was successful
+func listenAndServe(port string) bool {
+	// try to listen from the port
+	listener, err := net.Listen("tcp", ":"+port)
+	if err != nil {
+		fmt.Printf("error: could not start server: %q\n", err)
+		return false
+	}
+	go http.Serve(listener, nil)
+	return true
+}
+
+func launchBrowser(browser string, port string, file subscribe.Source) {
+	// Launch the browser
+	var args []string
+	if browser == "" {
+		switch runtime.GOOS {
+		case "darwin":
+			args = append(args, "open", "-g")
+			break
+		case "linux":
+			args = append(args, "xdg-open")
+			break
+		case "windows":
+			args = append(args, "cmd", "/C", "start", "/B")
+			break
+		}
+	} else {
+		args = append(args, browser)
+	}
+
+	if len(args) == 0 {
+		fmt.Println("warning: no open command")
+	} else {
+		args = append(args, "http://localhost:"+port+"?id="+file.GetID())
+		command := exec.Command(args[0], args[1:]...)
+		err := command.Start()
+		if err != nil {
+			fmt.Printf("error: could not open url: %v\n", err)
+		}
+	}
+}
+
+// ----------------------------------------------------------------------------
+// HTTP API Helpers -----------------------------------------------------------
+// ----------------------------------------------------------------------------
+func addFile(port string, f *markdown.File) (*http.Response, error) {
+	watchRequest := watcher.WatchFileRequest{File: f.Path}
+	marshalled, err := json.Marshal(watchRequest)
+	if err != nil {
+		return nil, err
+	}
+
+	client := http.Client{}
+	req, err := http.NewRequest("POST", "http://localhost:"+port, bytes.NewBuffer(marshalled))
+	if err != nil {
+		return nil, err
+	}
+	return client.Do(req)
+}
+
+func addData(port string, id string, data []byte) (*http.Response, error) {
+	client := http.Client{}
+	req, err := http.NewRequest(
+		"PUT",
+		"http://localhost:"+port+"?id="+id,
+		bytes.NewBuffer(data),
+	)
+
+	if err != nil {
+		return nil, err
+	}
+	return client.Do(req)
+}
+
+func killServer(port string) (*http.Response, error) {
+	client := http.Client{}
+	req, err := http.NewRequest("DELETE", "http://localhost:"+port, nil)
+	if err != nil {
+		return nil, err
+	}
+	return client.Do(req)
+}
+
+func killWatcher(port string, fileID string) (*http.Response, error) {
+	client := http.Client{}
+	req, err := http.NewRequest("DELETE", "http://localhost:"+port+"?id="+fileID, nil)
+	if err != nil {
+		return nil, err
+	}
+	return client.Do(req)
 }
