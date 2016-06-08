@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha1"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -39,7 +40,7 @@ func main() {
 	}
 
 	command := strings.ToLower(flag.Arg(0))
-	if command != "start" && command != "stop" && command != "send" {
+	if command != "start" && command != "stop" && command != "send" && command != "id" {
 		help()
 		return
 	}
@@ -52,6 +53,15 @@ func main() {
 	if command == "stop" {
 		fmt.Println("stopping")
 		stop(flag.Arg(1), strPort)
+		return
+	}
+
+	// get id command issued: return sha1 of the input
+	if command == "id" {
+		input := flag.Arg(1)
+		if input != "" {
+			fmt.Printf("%x\n", sha1.Sum([]byte(input)))
+		}
 		return
 	}
 
