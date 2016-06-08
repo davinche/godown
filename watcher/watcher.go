@@ -71,14 +71,14 @@ func NewWatchMonitor() *WatchMonitor {
 func (w *WatchMonitor) AddWatcher(f *markdown.File) {
 	w.Lock()
 	defer w.Unlock()
-	if w.watchers[f.ID] != nil {
+	if w.watchers[f.GetID()] != nil {
 		return
 	}
 	watcher := &watchFile{
 		file: f,
 		done: make(chan struct{}),
 	}
-	w.watchers[f.ID] = watcher
+	w.watchers[f.GetID()] = watcher
 	go watcher.Start(w.changes)
 }
 
