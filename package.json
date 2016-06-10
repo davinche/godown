@@ -1,0 +1,18 @@
+{
+  "name": "godown",
+  "version": "1.0.0",
+  "description": "GoDown: Markdown Previewer",
+  "author": "Vincent Cheung",
+  "bugs": {
+    "url": "https://github.com/davinche/GoDown/issues"
+  },
+  "homepage": "https://github.com/davinche/GoDown#readme",
+  "dependencies": {
+    "github-markdown-css": "^2.3.0"
+  },
+  "scripts": {
+	"build": "npm run hljs && npm run gh",
+	"hljs": "curl http://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.4.0/styles/github.min.css -o -s static/github.min.css && curl http://cdnjs.cloudflare.com/ajax/libs/highlight.js/9.4.0/highlight.min.js -o -s static/highlight.min.js",
+	"gh": "cp ./node_modules/github-markdown-css/github-markdown.css static/"
+  }
+}
