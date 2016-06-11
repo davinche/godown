@@ -68,8 +68,10 @@ func main() {
 			Action:    start,
 		},
 		{
-			Name:  "stop",
-			Usage: "stops the markdown server",
+			Name:      "stop",
+			Usage:     "stops the markdown server",
+			ArgsUsage: "<FILEPATH>",
+			Action:    stop,
 		},
 		{
 			Name:  "send",
@@ -85,6 +87,7 @@ func main() {
 		case "stderr":
 			log.SetOutput(os.Stderr)
 		default:
+			log.SetFlags(0)
 			log.SetOutput(ioutil.Discard)
 		}
 		return nil
@@ -111,6 +114,7 @@ func start(c *cli.Context) (ret error) {
 	// See if we need to start the daemon
 	coordinator, err := coordinator.New(port)
 	if err == nil {
+		// start the daemon
 		go coordinator.Serve()
 		addFile(file)
 		if shouldLaunch {
@@ -122,14 +126,36 @@ func start(c *cli.Context) (ret error) {
 			}
 		}
 		coordinator.Wait()
+		return
 	}
 
 	log.Printf("error: could not start coordinator: will try to POST: err=%q\n", err)
 	addFile(file)
-	return nil
+	if shouldLaunch {
+		uniqueID := getID(file)
+		if uniqueID != "" {
+			launchBrowser(uniqueID)
+		}
+	}
+	return
 }
 
-// Launch Browser Helper
+func stop(c *cli.Context) (ret error) {
+	ret = nil
+	file := c.Args().First()
+	log.Printf("stop command: port=%d; file=%q\n", port, file)
+	if file == "" {
+		killServer()
+		return
+	}
+	killFile(file)
+	return
+}
+
+// ----------------------------------------------------------------------------
+// Launch Browser Helper-------------------------------------------------------
+// ----------------------------------------------------------------------------
+
 func launchBrowser(id string) {
 	// Launch the browser
 	var args []string
@@ -150,14 +176,14 @@ func launchBrowser(id string) {
 	}
 
 	if len(args) == 0 {
-		log.Fatalln("error: could not launch browser")
+		log.Println("error: could not determine how to launch browser")
 	}
 	args = append(args, "http://localhost:"+strconv.Itoa(port)+"?id="+id)
-	log.Printf("launch browser: args=%v", args)
+	log.Printf("launch browser cmd: args=%v\n", args)
 	command := exec.Command(args[0], args[1:]...)
 	err := command.Start()
 	if err != nil {
-		log.Printf("error: could not open url: %v\n", err)
+		log.Printf("error: could not launch browser: %v\n", err)
 	}
 }
 
@@ -169,18 +195,33 @@ func addFile(filePath string) {
 	marshalled, err := json.Marshal(&struct{ Path string }{filePath})
 	if err != nil {
 		log.Fatalf("error: could not marshal filePath: error=%q\n", err)
-		return
 	}
 	req, err := http.NewRequest("POST", "http://localhost:"+strconv.Itoa(port), bytes.NewBuffer(marshalled))
 	if err != nil {
 		log.Fatalf("error: could create http request: error=%q\n", err)
-		return
 	}
 	res, err := client.Do(req)
 	if err != nil || res.StatusCode != http.StatusOK {
 		log.Fatalf("error: could not preview markdown file: err=%q; statusCode=%q\n", err, res.StatusCode)
-		return
 	}
+}
+
+func getID(filePath string) string {
+	client := http.Client{}
+	req, err := http.NewRequest("GET", "http://localhost:"+strconv.Itoa(port)+"/getid?path="+filePath, nil)
+	if err != nil {
+		log.Fatalf("error: could create http getID request: error=%q\n", err)
+	}
+	res, err := client.Do(req)
+	if err != nil || res.StatusCode != http.StatusOK {
+		log.Fatalf("error: could not get ID of the file: err=%q; statusCode=%q\n", err, res.StatusCode)
+	}
+	defer res.Body.Close()
+	data, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		log.Fatalf("error: could not get ID of the file from body: err=%q\n")
+	}
+	return string(data)
 }
 
 // func addData(port string, id string, data []byte) (*http.Response, error) {
@@ -197,20 +238,26 @@ func addFile(filePath string) {
 // 	return client.Do(req)
 // }
 
-// func killServer(port string) (*http.Response, error) {
-// 	client := http.Client{}
-// 	req, err := http.NewRequest("DELETE", "http://localhost:"+port, nil)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	return client.Do(req)
-// }
+func killServer() {
+	client := http.Client{}
+	req, err := http.NewRequest("DELETE", "http://localhost:"+strconv.Itoa(port), nil)
+	if err != nil {
+		log.Fatalf("error: could not create shutdown request: error=%q\n", err)
+	}
+	res, err := client.Do(req)
+	if err != nil || res.StatusCode != http.StatusOK {
+		log.Fatalf("error: could not shutdown server: error=%q; statusCode=%q\n", err, res.StatusCode)
+	}
+}
 
-// func killWatcher(port string, fileID string) (*http.Response, error) {
-// 	client := http.Client{}
-// 	req, err := http.NewRequest("DELETE", "http://localhost:"+port+"?id="+fileID, nil)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	return client.Do(req)
-// }
+func killFile(file string) {
+	client := http.Client{}
+	req, err := http.NewRequest("DELETE", "http://localhost:"+strconv.Itoa(port)+"?id="+file, nil)
+	if err != nil {
+		log.Fatalf("error: could not create delete file request: error=%q\n", err)
+	}
+	res, err := client.Do(req)
+	if err != nil || res.StatusCode != http.StatusOK {
+		log.Fatalf("error: could not delete file: error=%q; statusCode=%q\n", err, res.StatusCode)
+	}
+}

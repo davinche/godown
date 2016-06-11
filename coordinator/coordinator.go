@@ -1,9 +1,12 @@
 package coordinator
 
 import (
+	"io"
+	"log"
 	"net"
 	"net/http"
 	"strconv"
+	"sync"
 
 	"github.com/davinche/godown/dispatch"
 	"github.com/davinche/godown/server"
@@ -46,7 +49,19 @@ func (c *Coordinator) Serve() {
 	// Track sources
 	c.sources = append(c.sources, fileSource)
 	dispatcher.AddHandlerFunc(func(r *dispatch.Request) error {
-		// close(c.done)
+		if r.Type == "SHUTDOWN" {
+			log.Printf("coordinator status: waiting for services to shutdown")
+			wg := sync.WaitGroup{}
+			for _, src := range c.sources {
+				wg.Add(1)
+				go func() {
+					src.Wait()
+					wg.Done()
+				}()
+			}
+			wg.Wait()
+			close(c.done)
+		}
 		return nil
 	})
 
@@ -54,6 +69,22 @@ func (c *Coordinator) Serve() {
 	apiServer.Serve("/", c.port)
 	websocketServer.Serve("/connect", c.port)
 	filesServer.Serve("/static/")
+
+	// special helper endpoint
+	http.HandleFunc("/getid", func(w http.ResponseWriter, r *http.Request) {
+		p := r.FormValue("path")
+		if p == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		id := c.GetID(p)
+		if id == "" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		io.WriteString(w, id)
+	})
+
 	http.Serve(c.listener, nil)
 }
 
@@ -71,4 +102,5 @@ func (c *Coordinator) GetID(path string) string {
 // Wait blocks until server shutdown
 func (c *Coordinator) Wait() {
 	<-c.done
+	log.Println("coordinator status: shutdown complete")
 }

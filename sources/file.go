@@ -22,7 +22,6 @@ type File struct {
 	watching   map[string]map[*websocket.Conn]struct{}
 	watchers   map[string]*Watcher
 	done       chan struct{}
-	changes    chan *fileChange
 }
 
 // NewFile is the constructor for a new Files tracker
@@ -32,7 +31,6 @@ func NewFile(d *dispatch.Dispatcher) *File {
 		watching:   make(map[string]map[*websocket.Conn]struct{}),
 		watchers:   make(map[string]*Watcher),
 		done:       make(chan struct{}),
-		changes:    make(chan *fileChange),
 	}
 }
 
@@ -49,6 +47,8 @@ func (f *File) ServeRequest(r *dispatch.Request) error {
 	case "ADD_WSCLIENT":
 		clientRequest := r.Value.(*server.WebsocketRequest)
 		return f.addClient(clientRequest)
+	case "SHUTDOWN":
+		return f.close()
 	}
 	return nil
 }
@@ -56,11 +56,6 @@ func (f *File) ServeRequest(r *dispatch.Request) error {
 // Wait for termination
 func (f *File) Wait() {
 	<-f.done
-}
-
-// Close signals done
-func (f *File) Close() {
-	close(f.done)
 }
 
 // GetID returns a unique id for a given file
@@ -90,6 +85,29 @@ func (f *File) addFile(path string) error {
 		watcher := NewWatcher(f.dispatcher, absPath)
 		f.watchers[id] = watcher
 		watcher.Start()
+	}
+	return nil
+}
+
+func (f *File) addClient(request *server.WebsocketRequest) error {
+	// see if we're already watching the file
+	watching, ok := f.watching[request.ID]
+	if !ok {
+		log.Printf("watching error: currently not watching file: id=%q\n", request.ID)
+		return nil
+	}
+
+	// Add the client to the set of file listeners
+	_, ok = watching[request.WS]
+	if !ok {
+		log.Printf("watching status: adding client to the watch list: id=%q\n", request.ID)
+		watching[request.WS] = struct{}{}
+	}
+
+	// Ask our watcher to update the client
+	if watcher, ok := f.watchers[request.ID]; ok {
+		log.Printf("watching status: updating client with new data: id=%q\n", request.ID)
+		watcher.Update(request.WS)
 	}
 	return nil
 }
@@ -135,26 +153,17 @@ func (f *File) broadcast(change *fileChange) error {
 	return nil
 }
 
-func (f *File) addClient(request *server.WebsocketRequest) error {
-	// see if we're already watching the file
-	watching, ok := f.watching[request.ID]
-	if !ok {
-		log.Printf("watching error: currently not watching file: id=%q\n", request.ID)
-		return nil
+func (f *File) close() error {
+	for _, watcher := range f.watching {
+		for client := range watcher {
+			client.Close()
+		}
 	}
 
-	// Add the client to the set of file listeners
-	_, ok = watching[request.WS]
-	if !ok {
-		log.Printf("watching status: adding client to the watch list: id=%q\n", request.ID)
-		watching[request.WS] = struct{}{}
+	for _, watcher := range f.watchers {
+		watcher.Close()
 	}
-
-	// Ask our watcher to update the client
-	if watcher, ok := f.watchers[request.ID]; ok {
-		log.Printf("watching status: updating client with new data: id=%q\n", request.ID)
-		watcher.Update(request.WS)
-	}
+	close(f.done)
 	return nil
 }
 
