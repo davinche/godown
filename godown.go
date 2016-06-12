@@ -2,13 +2,10 @@ package main
 
 import (
 	"bytes"
-	"crypto/sha1"
 	"encoding/json"
-	"flag"
 	"fmt"
-	"html/template"
 	"io/ioutil"
-	"net"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -16,297 +13,199 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/davinche/godown/markdown"
-	"github.com/davinche/godown/memory"
-	"github.com/davinche/godown/server"
-	"github.com/davinche/godown/subscribe"
-	"github.com/davinche/godown/watcher"
-	"github.com/kardianos/osext"
+	"github.com/davinche/godown/coordinator"
+	"github.com/urfave/cli"
 )
 
+var port int
+var browser string
+var shouldLaunch bool
+
+var logging string
+
 func main() {
-	// Args
-	port := flag.Int("p", 1337, "Port")
-	browser := flag.String("b", "", "Specify the browser to preview with.")
-	shouldLaunch := flag.Bool("l", false, "Open the preview in a browser.")
-	flag.Parse()
-
-	strPort := strconv.Itoa(*port)
-	doneCh := make(chan struct{})
-
-	if len(flag.Args()) < 1 {
-		help()
-		return
-	}
-
-	command := strings.ToLower(flag.Arg(0))
-	if command != "start" && command != "stop" && command != "send" && command != "id" {
-		help()
-		return
+	// ------------------------------------------------------------------------
+	// Flags ------------------------------------------------------------------
+	// ------------------------------------------------------------------------
+	app := cli.NewApp()
+	app.Name = "godown"
+	app.Usage = "A markdown previewer written in Go"
+	app.Version = "0.1.1"
+	app.Flags = []cli.Flag{
+		cli.IntFlag{
+			Name:        "port, p",
+			Value:       1337,
+			Usage:       "the port for the markdown server",
+			Destination: &port,
+		},
+		cli.StringFlag{
+			Name:        "browser, b",
+			Value:       "",
+			Usage:       "the browser to launch the markdown preview in",
+			Destination: &browser,
+		},
+		cli.BoolFlag{
+			Name:        "l",
+			Usage:       "specify to launch automatically in the browser",
+			Destination: &shouldLaunch,
+		},
+		cli.StringFlag{
+			Name:        "logging",
+			Usage:       "specify logging output (stdout, stderr)",
+			Value:       "",
+			Destination: &logging,
+		},
 	}
 
 	// ------------------------------------------------------------------------
-	// Parse the Command ------------------------------------------------------
+	// Commands ---------------------------------------------------------------
 	// ------------------------------------------------------------------------
 
-	// stop command issued: send a stop request to the server
-	if command == "stop" {
-		fmt.Println("stopping")
-		stop(flag.Arg(1), strPort)
-		return
+	app.Commands = []cli.Command{
+		{
+			Name:      "start",
+			Usage:     "preview a file at a given path",
+			ArgsUsage: "<FILEPATH>",
+			Action:    start,
+		},
+		{
+			Name:      "stop",
+			Usage:     "stops the markdown server",
+			ArgsUsage: "<FILEPATH>",
+			Action:    stop,
+		},
+		{
+			Name:      "send",
+			Usage:     "sends data from stdin to the markdown server",
+			ArgsUsage: "<ID>",
+			Action:    send,
+		},
 	}
 
-	// get id command issued: return sha1 of the input
-	if command == "id" {
-		input := flag.Arg(1)
-		if input != "" {
-			fmt.Printf("%x\n", sha1.Sum([]byte(input)))
+	// See what kind of logging to do
+	app.Before = func(c *cli.Context) error {
+		switch strings.ToLower(logging) {
+		case "stdout":
+			log.SetOutput(os.Stdout)
+		case "stderr":
+			log.SetOutput(os.Stderr)
+		default:
+			log.SetFlags(0)
+			log.SetOutput(ioutil.Discard)
 		}
-		return
+		return nil
 	}
-
-	// Start and Send Commands require at least 1 positional argument
-	if flag.Arg(1) == "" {
-		help()
-		return
-	}
-
-	// parse the html template
-	binDir, err := osext.ExecutableFolder()
-	if err != nil {
-		fmt.Println("error: could not determine binary folder")
-		os.Exit(1)
-	}
-	templates := template.Must(template.ParseFiles(binDir + "/index.html"))
-
-	// ------------------------------------------------------------------------
-	// Server Registration ----------------------------------------------------
-	// ------------------------------------------------------------------------
-
-	// Watcher
-	watchMonitor := watcher.NewWatchMonitor()
-	// Websocket
-	socketServer := server.NewServer()
-	socketServer.Register("/connect")
-	// Static Files
-	static := http.FileServer(http.Dir(binDir + "/static"))
-
-	// API
-	serveRequest := func(w http.ResponseWriter, r *http.Request) {
-
-		// watch another file
-		if r.Method == "POST" {
-			defer r.Body.Close()
-			decoded := watcher.WatchFileRequest{}
-			decoder := json.NewDecoder(r.Body)
-			decoder.Decode(&decoded)
-			if decoded.File == "" {
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-
-			markdownFile, err := markdown.NewFile(decoded.File)
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte("error: could not create new markdown file type"))
-				return
-			}
-
-			// create a new watcher
-			watchMonitor.AddWatcher(markdownFile)
-			socketServer.CreateSubscriber(markdownFile)
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		fID := r.URL.Query().Get("id")
-		// Add a file to memory?
-		if r.Method == "PUT" {
-			// read the body
-			defer r.Body.Close()
-			data, err := ioutil.ReadAll(r.Body)
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte("error: could not read markdown body"))
-				return
-			}
-
-			// create new inmemory markdown file
-			memoryFile, err := memory.NewFile(fID, data)
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte("error: could not create new in-memory markdown file"))
-				return
-			}
-
-			// create new registry
-			socketServer.CreateSubscriber(memoryFile)
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		// shutting down the server?
-		if r.Method == "DELETE" {
-			// are we removing one file?
-			if fID != "" {
-				go watchMonitor.RemoveWatcher(fID)
-				socketServer.RemoveSubscriber(fID)
-				w.WriteHeader(http.StatusOK)
-				return
-			}
-
-			// or shut down the server
-			w.WriteHeader(http.StatusOK)
-			doneCh <- struct{}{}
-			return
-		}
-
-		// retrieiving which markdown file to get
-		if fID == "" {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		// serving the file
-		var host string
-		if host, _, err = net.SplitHostPort(r.Host); err != nil {
-			host = "localhost"
-		}
-		tStruct := struct {
-			Host   string
-			Port   string
-			FileID string
-		}{host, strPort, fID}
-		templates.ExecuteTemplate(w, "index.html", tStruct)
-	}
-
-	// ------------------------------------------------------------------------
-	// Start Server Processes--------------------------------------------------
-	// ------------------------------------------------------------------------
-	fileChanges := make(chan *markdown.File)
-	http.HandleFunc("/", serveRequest)
-	http.Handle("/static/", http.StripPrefix("/static/", static))
-	isDaemon := listenAndServe(strPort)
-	go watchMonitor.Start(fileChanges)
-
-	// START THE SERVER -------------------------------------------------------
-	if command == "start" {
-		markdownFile, err := markdown.NewFile(flag.Arg(1))
-		if err != nil {
-			fmt.Printf("error: could not obtain markdown file: %q\n", err)
-			os.Exit(1)
-			return
-		}
-		resp, err := addFile(strPort, markdownFile)
-		if err != nil || resp.StatusCode != http.StatusOK {
-			fmt.Printf("error: could not add markdown file to the watch list: %q\n", err)
-			os.Exit(1)
-			return
-		}
-
-		if *shouldLaunch {
-			launchBrowser(*browser, strPort, markdownFile)
-		}
-	}
-
-	if command == "send" {
-		id := flag.Arg(1)
-		data, err := ioutil.ReadAll(os.Stdin)
-		if err != nil {
-			fmt.Printf("error: could not read in data: %q\n", err)
-			os.Exit(1)
-			return
-		}
-
-		file, err := memory.NewFile(id, data)
-		if err != nil {
-			fmt.Printf("error: could not prepare data to send to server: %q\n", err)
-			os.Exit(1)
-			return
-		}
-
-		req, err := addData(strPort, id, file.Content)
-		if err != nil || req.StatusCode != http.StatusOK {
-			fmt.Printf("error: there was an error in the request to the server: e=%v; code=%v\n", err, req.StatusCode)
-			os.Exit(1)
-			return
-		}
-
-		if *shouldLaunch {
-			launchBrowser(*browser, strPort, file)
-		}
-	}
-
-	if isDaemon {
-		// Loop message from watcher
-		for {
-			select {
-			case <-doneCh:
-				watchMonitor.Done()
-				return
-			case changes := <-fileChanges:
-				socketServer.Broadcast(changes)
-			}
-		}
-	}
-
+	app.Run(os.Args)
 }
 
 // ----------------------------------------------------------------------------
-// Helpers --------------------------------------------------------------------
+// Commands -------------------------------------------------------------------
 // ----------------------------------------------------------------------------
 
-func help() {
-	fmt.Fprintln(os.Stdout, "usage: godown {FLAGS} [COMMANDS] <PATH>\n")
-	fmt.Fprintln(os.Stdout, "  Watches a markdown file for changes and previews it in the browser.\n")
-	fmt.Fprintln(os.Stdout, "FLAGS:\n")
-	flag.PrintDefaults()
-	fmt.Fprintln(os.Stdout, "\nCOMMANDS:\n")
-	fmt.Fprintln(os.Stdout, "  start <PATH>")
-	fmt.Fprintf(os.Stdout, "        %s\n", "Starts watching a file at the given path.")
-	fmt.Fprintln(os.Stdout, "  stop <PATH>")
-	fmt.Fprintf(os.Stdout, "        %s\n", "*optional* path: "+
-		"Stops watching a file if given a path or terminates the Godown daemon.")
-	fmt.Fprintln(os.Stdout, "  id <PATH>")
-	fmt.Fprintf(os.Stdout, "        %s\n", "Prints the unique identifier for the given path.")
-	fmt.Fprintln(os.Stdout, "  send [ID]")
-	fmt.Fprintf(os.Stdout, "        %s\n", "Given an identifier and piped markdown data, "+
-		"send it to the daemon for rendering.")
-}
-
-// Send DELETE to server to either: stop watching a file or kill the server
-func stop(filePath string, port string) {
-	if filePath != "" {
-		fmt.Printf("stopping file %q\n", filePath)
-		markdownFile, err := markdown.NewFile(filePath)
-		if err != nil {
-			fmt.Printf("error: could not obtain markdown file: %q\n", err)
-			return
-		}
-		if _, err = killWatcher(port, markdownFile.GetID()); err != nil {
-			fmt.Printf("error: could not create stop file watcher: %q\n", err)
-		}
+func start(c *cli.Context) (ret error) {
+	ret = nil
+	file := c.Args().First()
+	// Make sure a file to load is specified
+	if file == "" {
+		cli.ShowSubcommandHelp(c)
 		return
 	}
 
-	if _, err := killServer(port); err != nil {
-		fmt.Printf("error: could not create stop server request: %q\n", err)
+	log.Printf("start command: port=%d; shouldLaunch=%v, browser=%q; file=%q",
+		port, shouldLaunch, browser, file)
+
+	// See if we need to start the daemon
+	coordinator, err := coordinator.New(port)
+	if err == nil {
+		// start the daemon
+		go coordinator.Serve()
+		addFile(file)
+		if shouldLaunch {
+			uniqueID := coordinator.GetID(file)
+			if uniqueID != "" {
+				launchBrowser(uniqueID)
+			} else {
+				log.Println("error: could not get uniqueID to launch browser")
+			}
+		}
+		coordinator.Wait()
 		return
 	}
+
+	log.Printf("error: could not start coordinator: will try to POST: err=%q\n", err)
+	addFile(file)
+	if shouldLaunch {
+		uniqueID := getID(file)
+		if uniqueID != "" {
+			launchBrowser(uniqueID)
+		}
+	}
+	return
 }
 
-// Try to start the daemon; return whether or not it was successful
-func listenAndServe(port string) bool {
-	// try to listen from the port
-	listener, err := net.Listen("tcp", ":"+port)
+func stop(c *cli.Context) (ret error) {
+	ret = nil
+	file := c.Args().First()
+	log.Printf("stop command: port=%d; file=%q\n", port, file)
+	if file == "" {
+		killServer()
+		return
+	}
+	killFile(file)
+	return
+}
+
+func send(c *cli.Context) (ret error) {
+	ret = nil
+	file := c.Args().First()
+	// Make sure an identifier is sent
+	if file == "" {
+		cli.ShowSubcommandHelp(c)
+		return
+	}
+	log.Printf("send command: port=%d; shouldLaunch=%v\n", port, shouldLaunch)
+	data, err := ioutil.ReadAll(os.Stdin)
 	if err != nil {
-		fmt.Printf("error: could not start server: %q\n", err)
-		return false
+		log.Fatalf("error: could not read markdown data: error=%q\n", err)
 	}
-	go http.Serve(listener, nil)
-	return true
+	log.Printf("send command: read data: data=%q\n", string(data))
+
+	// See if we need to start the daemon
+	coordinator, err := coordinator.New(port)
+	if err == nil {
+		// start the daemon
+		go coordinator.Serve()
+		addData(file, data)
+		if shouldLaunch {
+			fmt.Println("FILE")
+			fmt.Println(file)
+			uniqueID := coordinator.GetID(file)
+			fmt.Println("UNIQUEID")
+			fmt.Println(uniqueID)
+			if uniqueID != "" {
+				launchBrowser(uniqueID)
+			} else {
+				log.Println("error: could not get uniqueID to launch browser")
+			}
+		}
+		coordinator.Wait()
+		return
+	}
+	addData(file, data)
+	if shouldLaunch {
+		uniqueID := getID(file)
+		if uniqueID != "" {
+			launchBrowser(uniqueID)
+		}
+	}
+	return
 }
 
-func launchBrowser(browser string, port string, file subscribe.Source) {
+// ----------------------------------------------------------------------------
+// Launch Browser Helper-------------------------------------------------------
+// ----------------------------------------------------------------------------
+
+func launchBrowser(id string) {
 	// Launch the browser
 	var args []string
 	if browser == "" {
@@ -326,63 +225,93 @@ func launchBrowser(browser string, port string, file subscribe.Source) {
 	}
 
 	if len(args) == 0 {
-		fmt.Println("warning: no open command")
-	} else {
-		args = append(args, "http://localhost:"+port+"?id="+file.GetID())
-		command := exec.Command(args[0], args[1:]...)
-		err := command.Start()
-		if err != nil {
-			fmt.Printf("error: could not open url: %v\n", err)
-		}
+		log.Println("error: could not determine how to launch browser")
+	}
+	args = append(args, "http://localhost:"+strconv.Itoa(port)+"?id="+id)
+	log.Printf("launch browser cmd: args=%v\n", args)
+	command := exec.Command(args[0], args[1:]...)
+	err := command.Start()
+	if err != nil {
+		log.Printf("error: could not launch browser: %v\n", err)
 	}
 }
 
 // ----------------------------------------------------------------------------
 // HTTP API Helpers -----------------------------------------------------------
 // ----------------------------------------------------------------------------
-func addFile(port string, f *markdown.File) (*http.Response, error) {
-	watchRequest := watcher.WatchFileRequest{File: f.Path}
-	marshalled, err := json.Marshal(watchRequest)
-	if err != nil {
-		return nil, err
-	}
-
+func addFile(filePath string) {
 	client := http.Client{}
-	req, err := http.NewRequest("POST", "http://localhost:"+port, bytes.NewBuffer(marshalled))
+	marshalled, err := json.Marshal(&struct{ Path string }{filePath})
 	if err != nil {
-		return nil, err
+		log.Fatalf("error: could not marshal filePath: error=%q\n", err)
 	}
-	return client.Do(req)
+	req, err := http.NewRequest("POST", "http://localhost:"+strconv.Itoa(port), bytes.NewBuffer(marshalled))
+	if err != nil {
+		log.Fatalf("error: could create http request: error=%q\n", err)
+	}
+	res, err := client.Do(req)
+	if err != nil || res.StatusCode != http.StatusOK {
+		log.Fatalf("error: could not preview markdown file: err=%q; statusCode=%q\n", err, res.StatusCode)
+	}
 }
 
-func addData(port string, id string, data []byte) (*http.Response, error) {
+func getID(filePath string) string {
+	client := http.Client{}
+	req, err := http.NewRequest("GET", "http://localhost:"+strconv.Itoa(port)+"/getid?path="+filePath, nil)
+	if err != nil {
+		log.Fatalf("error: could create http getID request: error=%q\n", err)
+	}
+	res, err := client.Do(req)
+	if err != nil || res.StatusCode != http.StatusOK {
+		log.Fatalf("error: could not get ID of the file: err=%q; statusCode=%q\n", err, res.StatusCode)
+	}
+	defer res.Body.Close()
+	data, err := ioutil.ReadAll(res.Body)
+	if err != nil {
+		log.Fatalf("error: could not get ID of the file from body: err=%q\n")
+	}
+	return string(data)
+}
+
+func addData(id string, data []byte) {
+	fmt.Println("in ADD DAata")
+	fmt.Println(id)
 	client := http.Client{}
 	req, err := http.NewRequest(
 		"PUT",
-		"http://localhost:"+port+"?id="+id,
+		"http://localhost:"+strconv.Itoa(port)+"?id="+id,
 		bytes.NewBuffer(data),
 	)
 
 	if err != nil {
-		return nil, err
+		log.Fatalf("error: could not create PUT request: error=%q\n", err)
 	}
-	return client.Do(req)
+	res, err := client.Do(req)
+	if err != nil || res.StatusCode != http.StatusOK {
+		log.Fatalf("error: could not send data to markdown server: error=%q; statusCode=%q\n", err, res.StatusCode)
+	}
 }
 
-func killServer(port string) (*http.Response, error) {
+func killServer() {
 	client := http.Client{}
-	req, err := http.NewRequest("DELETE", "http://localhost:"+port, nil)
+	req, err := http.NewRequest("DELETE", "http://localhost:"+strconv.Itoa(port), nil)
 	if err != nil {
-		return nil, err
+		log.Fatalf("error: could not create shutdown request: error=%q\n", err)
 	}
-	return client.Do(req)
+	res, err := client.Do(req)
+	if err != nil || res.StatusCode != http.StatusOK {
+		log.Fatalf("error: could not shutdown server: error=%q; statusCode=%q\n", err, res.StatusCode)
+	}
 }
 
-func killWatcher(port string, fileID string) (*http.Response, error) {
+func killFile(file string) {
 	client := http.Client{}
-	req, err := http.NewRequest("DELETE", "http://localhost:"+port+"?id="+fileID, nil)
+	req, err := http.NewRequest("DELETE", "http://localhost:"+strconv.Itoa(port)+"?id="+file, nil)
 	if err != nil {
-		return nil, err
+		log.Fatalf("error: could not create delete file request: error=%q\n", err)
 	}
-	return client.Do(req)
+	res, err := client.Do(req)
+	if err != nil || res.StatusCode != http.StatusOK {
+		log.Fatalf("error: could not delete file: error=%q; statusCode=%q\n", err, res.StatusCode)
+	}
 }

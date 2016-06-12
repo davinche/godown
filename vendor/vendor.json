@@ -21,6 +21,12 @@
 			"revisionTime": "2015-10-28T00:19:15Z"
 		},
 		{
+			"checksumSHA1": "ixXMIecKKZNhBEk967FABRQkLtE=",
+			"path": "github.com/urfave/cli",
+			"revision": "7817f72540afa438b349cfa612e9d14618573adc",
+			"revisionTime": "2016-06-09T02:50:24Z"
+		},
+		{
 			"checksumSHA1": "likOl7O0BJntqagR050kkOBuY4o=",
 			"path": "golang.org/x/net/websocket",
 			"revision": "c4c3ea71919de159c9e246d7be66deb7f0a39a58",
