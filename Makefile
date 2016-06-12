@@ -2,7 +2,7 @@ default:
 	install
 
 build: xcompile
-	npm build
+	npm run build
 	cp -r ./static ./build/
 	cp ./index.html ./build/
 
