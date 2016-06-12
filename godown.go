@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -74,8 +75,10 @@ func main() {
 			Action:    stop,
 		},
 		{
-			Name:  "send",
-			Usage: "sends data from stdin to the markdown server",
+			Name:      "send",
+			Usage:     "sends data from stdin to the markdown server",
+			ArgsUsage: "<ID>",
+			Action:    send,
 		},
 	}
 
@@ -152,6 +155,52 @@ func stop(c *cli.Context) (ret error) {
 	return
 }
 
+func send(c *cli.Context) (ret error) {
+	ret = nil
+	file := c.Args().First()
+	// Make sure an identifier is sent
+	if file == "" {
+		cli.ShowSubcommandHelp(c)
+		return
+	}
+	log.Printf("send command: port=%d; shouldLaunch=%v\n", port, shouldLaunch)
+	data, err := ioutil.ReadAll(os.Stdin)
+	if err != nil {
+		log.Fatalf("error: could not read markdown data: error=%q\n", err)
+	}
+	log.Printf("send command: read data: data=%q\n", string(data))
+
+	// See if we need to start the daemon
+	coordinator, err := coordinator.New(port)
+	if err == nil {
+		// start the daemon
+		go coordinator.Serve()
+		addData(file, data)
+		if shouldLaunch {
+			fmt.Println("FILE")
+			fmt.Println(file)
+			uniqueID := coordinator.GetID(file)
+			fmt.Println("UNIQUEID")
+			fmt.Println(uniqueID)
+			if uniqueID != "" {
+				launchBrowser(uniqueID)
+			} else {
+				log.Println("error: could not get uniqueID to launch browser")
+			}
+		}
+		coordinator.Wait()
+		return
+	}
+	addData(file, data)
+	if shouldLaunch {
+		uniqueID := getID(file)
+		if uniqueID != "" {
+			launchBrowser(uniqueID)
+		}
+	}
+	return
+}
+
 // ----------------------------------------------------------------------------
 // Launch Browser Helper-------------------------------------------------------
 // ----------------------------------------------------------------------------
@@ -224,19 +273,24 @@ func getID(filePath string) string {
 	return string(data)
 }
 
-// func addData(port string, id string, data []byte) (*http.Response, error) {
-// 	client := http.Client{}
-// 	req, err := http.NewRequest(
-// 		"PUT",
-// 		"http://localhost:"+port+"?id="+id,
-// 		bytes.NewBuffer(data),
-// 	)
+func addData(id string, data []byte) {
+	fmt.Println("in ADD DAata")
+	fmt.Println(id)
+	client := http.Client{}
+	req, err := http.NewRequest(
+		"PUT",
+		"http://localhost:"+strconv.Itoa(port)+"?id="+id,
+		bytes.NewBuffer(data),
+	)
 
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	return client.Do(req)
-// }
+	if err != nil {
+		log.Fatalf("error: could not create PUT request: error=%q\n", err)
+	}
+	res, err := client.Do(req)
+	if err != nil || res.StatusCode != http.StatusOK {
+		log.Fatalf("error: could not send data to markdown server: error=%q; statusCode=%q\n", err, res.StatusCode)
+	}
+}
 
 func killServer() {
 	client := http.Client{}

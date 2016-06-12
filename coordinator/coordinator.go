@@ -44,10 +44,12 @@ func (c *Coordinator) Serve() {
 
 	// Sources of markdown
 	fileSource := sources.NewFile(dispatcher)
+	memSource := sources.NewMem(dispatcher)
 	dispatcher.AddHandler(fileSource)
+	dispatcher.AddHandler(memSource)
 
 	// Track sources
-	c.sources = append(c.sources, fileSource)
+	c.sources = append(c.sources, fileSource, memSource)
 	dispatcher.AddHandlerFunc(func(r *dispatch.Request) error {
 		if r.Type == "SHUTDOWN" {
 			log.Printf("coordinator status: waiting for services to shutdown")
@@ -90,12 +92,17 @@ func (c *Coordinator) Serve() {
 
 // GetID returns the id of a file
 func (c *Coordinator) GetID(path string) string {
+	log.Printf("coordinator status: looking for unique ID: path=%q\n", path)
 	for _, source := range c.sources {
 		id, err := source.GetID(path)
+		if err != nil {
+			log.Printf("coordinator warning: %v\n", err)
+		}
 		if err == nil {
 			return id
 		}
 	}
+	log.Printf("coordinator error: could not find unique ID: path=%q\n", path)
 	return ""
 }
 

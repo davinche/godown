@@ -62,9 +62,14 @@ func (f *File) Wait() {
 func (f *File) GetID(path string) (string, error) {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
-		return "", fmt.Errorf("file error: cannot get absolute path: err=%q\n", err)
+		return "", fmt.Errorf("file error: cannot get absolute path: err=%q", err)
 	}
-	return getID(absPath), nil
+
+	id := getID(absPath)
+	if _, ok := f.watchers[id]; ok {
+		return id, nil
+	}
+	return "", fmt.Errorf("file warning: cannot find file: path=%q; id=%q", path, id)
 }
 
 // adds a file to be watched

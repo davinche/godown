@@ -116,7 +116,14 @@ func (a *API) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		done, errCh := a.dispatcher.Dispatch("MEM_ADD", string(data))
+		done, errCh := a.dispatcher.Dispatch("MEM_ADD", &struct {
+			ID   string
+			Data []byte
+		}{
+			ID:   id,
+			Data: data,
+		})
+
 		select {
 		case <-done:
 			w.WriteHeader(http.StatusOK)
