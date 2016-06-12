@@ -81,7 +81,7 @@ func (f *File) addFile(path string) error {
 	}
 	id := getID(absPath)
 	if _, ok := f.watching[id]; !ok {
-		log.Printf("file status: added new connection list for file: id=%q\n", id)
+		log.Printf("file status: now accepting clients: id=%q\n", id)
 		f.watching[id] = make(map[*websocket.Conn]struct{})
 	}
 

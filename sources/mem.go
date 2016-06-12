@@ -108,6 +108,7 @@ func (m *Mem) addFile(r interface{}) error {
 func (m *Mem) delFile(id string) error {
 	uniqueID := getID(id)
 	if watching, ok := m.watching[uniqueID]; ok {
+		log.Printf("memory status: untracking file: id=%q\n", uniqueID)
 		for client := range watching {
 			client.Close()
 		}
