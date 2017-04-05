@@ -8,7 +8,7 @@ import (
 
 	"github.com/davinche/godown/dispatch"
 	"github.com/davinche/godown/server"
-	"github.com/russross/blackfriday"
+	md "github.com/shurcooL/github_flavored_markdown"
 	"golang.org/x/net/websocket"
 )
 
@@ -84,7 +84,7 @@ func (m *Mem) addFile(r interface{}) error {
 	data := vData.Bytes()
 
 	// markdownify
-	mData := string(blackfriday.MarkdownCommon(data))
+	mData := string(md.Markdown(data))
 
 	uniqueID := getID(id)
 	if _, ok := m.watching[uniqueID]; !ok {

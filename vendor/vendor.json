@@ -9,28 +9,88 @@
 			"revisionTime": "2015-12-22T15:32:29Z"
 		},
 		{
-			"checksumSHA1": "b65j8iurSMG0nedIgJiv71D4Ehc=",
+			"checksumSHA1": "DWtoL5LzvhxQ6LuchRPoSbsNhp4=",
+			"path": "github.com/microcosm-cc/bluemonday",
+			"revision": "e79763773ab6222ca1d5a7cbd9d62d83c1f77081",
+			"revisionTime": "2016-12-02T14:38:24Z"
+		},
+		{
+			"checksumSHA1": "c7jHQZk5ZEsFR9EXsWJXkszPBZA=",
 			"path": "github.com/russross/blackfriday",
-			"revision": "1d6b8e9301e720b08a8938b8c25c018285885438",
-			"revisionTime": "2016-05-31T11:12:24Z"
+			"revision": "5f33e7b7878355cd2b7e6b8eefc48a5472c69f70",
+			"revisionTime": "2016-10-03T16:27:22Z"
 		},
 		{
-			"checksumSHA1": "XXTR/ftEYSqQn4+Y7wNfiJJmq9U=",
+			"checksumSHA1": "iWCtyR1TkJ22Bi/ygzfKDvOQdQY=",
+			"path": "github.com/sergi/go-diff/diffmatchpatch",
+			"revision": "24e2351369ec4949b2ed0dc5c477afdd4c4034e8",
+			"revisionTime": "2017-01-18T13:12:30Z"
+		},
+		{
+			"checksumSHA1": "eQrAV5NM/aQ3Ovg0gZNYCXukv7g=",
+			"path": "github.com/shurcooL/github_flavored_markdown",
+			"revision": "3c64cb3ce00a3f4feae0c53ce7c2cc2fdacba14b",
+			"revisionTime": "2017-02-10T17:18:58Z"
+		},
+		{
+			"checksumSHA1": "grgQLMEZqYe+xJpTWG2RKgFXUZ4=",
+			"path": "github.com/shurcooL/highlight_diff",
+			"revision": "d3b292edd8c8311b9d264e3adc26cdf39695fe9b",
+			"revisionTime": "2016-09-18T03:38:20Z"
+		},
+		{
+			"checksumSHA1": "G8O4iv2LCjVxKUH+PiykFpCcqK8=",
+			"path": "github.com/shurcooL/highlight_go",
+			"revision": "7867c2dec5d03326c952ca98eda2abf907ddfcf3",
+			"revisionTime": "2016-09-18T04:03:47Z"
+		},
+		{
+			"checksumSHA1": "hNlm9S4NgEs+h/waqY+ZSeETZYM=",
+			"path": "github.com/shurcooL/octiconssvg",
+			"revision": "1aed2117d2aa8eed76a052936e468e5354750701",
+			"revisionTime": "2017-01-21T07:25:49Z"
+		},
+		{
+			"checksumSHA1": "kbgJvKG3NRoqU91rYnXGnyR+8HQ=",
 			"path": "github.com/shurcooL/sanitized_anchor_name",
-			"revision": "10ef21a441db47d8b13ebcc5fd2310f636973c77",
-			"revisionTime": "2015-10-28T00:19:15Z"
+			"revision": "1dba4b3954bc059efc3991ec364f9f9a35f597d2",
+			"revisionTime": "2016-09-18T04:11:01Z"
 		},
 		{
-			"checksumSHA1": "ixXMIecKKZNhBEk967FABRQkLtE=",
+			"checksumSHA1": "hg5j4kdVPNACc4G8nsb1MX/U7KE=",
+			"path": "github.com/sourcegraph/annotate",
+			"revision": "f4cad6c6324d3f584e1743d8b3e0e017a5f3a636",
+			"revisionTime": "2016-01-23T01:39:49Z"
+		},
+		{
+			"checksumSHA1": "yofaxW/TfrmFl4T5x3LaaYMjS7Y=",
+			"path": "github.com/sourcegraph/syntaxhighlight",
+			"revision": "c95ac474b7cb9c711f4591b553a2caaa24ea3d37",
+			"revisionTime": "2016-10-17T20:57:55Z"
+		},
+		{
+			"checksumSHA1": "ToTZYDqlvtuFsetAq5FeCwUxp0E=",
 			"path": "github.com/urfave/cli",
-			"revision": "7817f72540afa438b349cfa612e9d14618573adc",
-			"revisionTime": "2016-06-09T02:50:24Z"
+			"revision": "d86a009f5e13f83df65d0d6cee9a2e3f1445f0da",
+			"revisionTime": "2016-11-02T13:18:01Z"
 		},
 		{
-			"checksumSHA1": "likOl7O0BJntqagR050kkOBuY4o=",
+			"checksumSHA1": "vqc3a+oTUGX8PmD0TS+qQ7gmN8I=",
+			"path": "golang.org/x/net/html",
+			"revision": "ffcf1bedda3b04ebb15a168a59800a73d6dc0f4d",
+			"revisionTime": "2017-03-29T01:43:45Z"
+		},
+		{
+			"checksumSHA1": "00eQaGynDYrv3tL+C7l9xH0IDZg=",
+			"path": "golang.org/x/net/html/atom",
+			"revision": "ffcf1bedda3b04ebb15a168a59800a73d6dc0f4d",
+			"revisionTime": "2017-03-29T01:43:45Z"
+		},
+		{
+			"checksumSHA1": "7EZyXN0EmZLgGxZxK01IJua4c8o=",
 			"path": "golang.org/x/net/websocket",
-			"revision": "c4c3ea71919de159c9e246d7be66deb7f0a39a58",
-			"revisionTime": "2016-05-27T23:48:58Z"
+			"revision": "ffcf1bedda3b04ebb15a168a59800a73d6dc0f4d",
+			"revisionTime": "2017-03-29T01:43:45Z"
 		}
 	],
 	"rootPath": "github.com/davinche/godown"

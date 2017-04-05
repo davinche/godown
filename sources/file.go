@@ -13,7 +13,7 @@ import (
 
 	"github.com/davinche/godown/dispatch"
 	"github.com/davinche/godown/server"
-	"github.com/russross/blackfriday"
+	md "github.com/shurcooL/github_flavored_markdown"
 )
 
 // File is used to track watched files
@@ -222,7 +222,7 @@ func (w *Watcher) Start() (string, error) {
 					}
 					w.dispatcher.Dispatch("FILE_CHANGE", &fileChange{
 						Path:  w.filePath,
-						Value: string(blackfriday.MarkdownCommon(data)),
+						Value: string(md.Markdown(data)),
 					})
 					stat = newStat
 				}
@@ -231,7 +231,7 @@ func (w *Watcher) Start() (string, error) {
 
 	}()
 
-	return string(blackfriday.MarkdownCommon(data)), nil
+	return string(md.Markdown(data)), nil
 }
 
 // Update sends the client the markdown data from our file
@@ -241,7 +241,7 @@ func (w *Watcher) Update(ws *websocket.Conn) {
 		return
 	}
 	websocket.JSON.Send(ws, RenderFormat{
-		Render: string(blackfriday.MarkdownCommon(data)),
+		Render: string(md.Markdown(data)),
 	})
 }
 
