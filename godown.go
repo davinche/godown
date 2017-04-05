@@ -22,6 +22,7 @@ var browser string
 var shouldLaunch bool
 
 var logging string
+var VERSION string
 
 func main() {
 	// ------------------------------------------------------------------------
@@ -30,7 +31,7 @@ func main() {
 	app := cli.NewApp()
 	app.Name = "godown"
 	app.Usage = "A markdown previewer written in Go"
-	app.Version = "0.1.1"
+	app.Version = VERSION
 	app.Flags = []cli.Flag{
 		cli.IntFlag{
 			Name:        "port, p",
