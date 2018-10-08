@@ -47,6 +47,7 @@ func (c *Coordinator) Serve() {
 	memSource := sources.NewMem(dispatcher)
 	dispatcher.AddHandler(fileSource)
 	dispatcher.AddHandler(memSource)
+	dispatcher.AddHandler(filesServer)
 
 	// Track sources
 	c.sources = append(c.sources, fileSource, memSource)
@@ -68,9 +69,9 @@ func (c *Coordinator) Serve() {
 	})
 
 	// httpmux handlers
-	apiServer.Serve("/", c.port)
+	apiServer.Serve("/api", c.port)
 	websocketServer.Serve("/connect", c.port)
-	filesServer.Serve("/static/")
+	filesServer.Serve("/")
 
 	// special helper endpoint
 	http.HandleFunc("/getid", func(w http.ResponseWriter, r *http.Request) {
@@ -89,6 +90,7 @@ func (c *Coordinator) Serve() {
 
 	http.Serve(c.listener, nil)
 }
+
 
 // GetID returns the id of a file
 func (c *Coordinator) GetID(path string) string {

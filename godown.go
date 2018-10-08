@@ -228,7 +228,7 @@ func launchBrowser(id string) {
 	if len(args) == 0 {
 		log.Println("error: could not determine how to launch browser")
 	}
-	args = append(args, "http://localhost:"+strconv.Itoa(port)+"?id="+id)
+	args = append(args, "http://localhost:"+strconv.Itoa(port)+"/api?id="+id)
 	log.Printf("launch browser cmd: args=%v\n", args)
 	command := exec.Command(args[0], args[1:]...)
 	err := command.Start()
@@ -246,7 +246,7 @@ func addFile(filePath string) {
 	if err != nil {
 		log.Fatalf("error: could not marshal filePath: error=%q\n", err)
 	}
-	req, err := http.NewRequest("POST", "http://localhost:"+strconv.Itoa(port), bytes.NewBuffer(marshalled))
+	req, err := http.NewRequest("POST", "http://localhost:"+strconv.Itoa(port)+"/api", bytes.NewBuffer(marshalled))
 	if err != nil {
 		log.Fatalf("error: could create http request: error=%q\n", err)
 	}
@@ -280,7 +280,7 @@ func addData(id string, data []byte) {
 	client := http.Client{}
 	req, err := http.NewRequest(
 		"PUT",
-		"http://localhost:"+strconv.Itoa(port)+"?id="+id,
+		"http://localhost:"+strconv.Itoa(port)+"/api?id="+id,
 		bytes.NewBuffer(data),
 	)
 
@@ -295,7 +295,7 @@ func addData(id string, data []byte) {
 
 func killServer() {
 	client := http.Client{}
-	req, err := http.NewRequest("DELETE", "http://localhost:"+strconv.Itoa(port), nil)
+	req, err := http.NewRequest("DELETE", "http://localhost:"+strconv.Itoa(port)+"/api", nil)
 	if err != nil {
 		log.Fatalf("error: could not create shutdown request: error=%q\n", err)
 	}
@@ -307,7 +307,7 @@ func killServer() {
 
 func killFile(file string) {
 	client := http.Client{}
-	req, err := http.NewRequest("DELETE", "http://localhost:"+strconv.Itoa(port)+"?id="+file, nil)
+	req, err := http.NewRequest("DELETE", "http://localhost:"+strconv.Itoa(port)+"/api?id="+file, nil)
 	if err != nil {
 		log.Fatalf("error: could not create delete file request: error=%q\n", err)
 	}
